@@ -4,86 +4,108 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="UTM Gas Lift Diagnostic Tool", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="Gas Lift Design & Diagnostic Tool", layout="wide", page_icon="🛢️")
 
-st.title("🤖 Gas Lift Design & Diagnostic Assistant")
-st.markdown("### Exact Graphical Method with Automated Engineering Interpretation")
+st.title("🛢️ Gas Lift Design & Diagnostic Tool")
+st.markdown("### Integrated Graphical Design with Automated Interpretation")
 
 # --- SIDEBAR INPUTS ---
-st.sidebar.header("📂 1. Reservoir & Well Data")
+st.sidebar.header("📁 Reservoir & Well Geometry")
 depth_total = st.sidebar.number_input("Total well depth (ft)", value=10000)
-p_s = st.sidebar.number_input("Static Pressure (Ps), psig", value=3000)
-p_wf = st.sidebar.number_input("Flowing Pressure (Pwf), psig", value=2867)
+p_s = st.sidebar.number_input("Static Reservoir Pressure (Ps), psig", value=3000)
+p_wf = st.sidebar.number_input("Flowing BHP (Pwf), psig", value=2867)
 p_wh = st.sidebar.number_input("Wellhead Pressure (Pwh), psig", value=100)
 
-st.sidebar.header("📂 2. Casing Pressures")
-p_ko_surf = st.sidebar.number_input("Kick-off Pressure (Pko), psig", value=1000)
-p_so_surf = st.sidebar.number_input("Operating Pressure (Pso), psig", value=950)
+st.sidebar.header("📁 Injection Pressures")
+p_ko_surf = st.sidebar.number_input("Surface Kick-off Pressure (Pko), psig", value=1000)
+p_so_surf = st.sidebar.number_input("Surface Operating Pressure (Pso), psig", value=950)
 
-st.sidebar.header("📂 3. Gradients")
+st.sidebar.header("📁 Gradients")
 gs = st.sidebar.number_input("Fluid Gradient (Gs), psi/ft", value=0.455, format="%.3f")
 gpko = st.sidebar.number_input("Gas Kick-off Gradient, psi/ft", value=0.025, format="%.3f")
 gpso = st.sidebar.number_input("Gas Operating Gradient, psi/ft", value=0.022, format="%.3f")
 
 # --- CALCULATIONS ---
+# Fluid Levels
 wfl_depth = depth_total - (p_wf / gs)
 sfl_depth = depth_total - (p_s / gs)
+
+# Casing Pressures at Depth
 p_ko_td = p_ko_surf + (gpko * depth_total)
 p_so_td = p_so_surf + (gpso * depth_total)
 
-# Point of Balance (POB)
+# Intersection: Point of Balance (POB)
+# Intersection of Tubing Gradient (WFL-Pwf) and Casing Gradient (Pso)
 d_pob = (p_so_surf - p_wf + gs * depth_total) / (gs - gpso)
 p_pob = p_so_surf + (gpso * d_pob)
 
-# Deepest Point of Injection (DPOI) - 100psi offset
+# Injection Point (DPOI) - 100 psi offset logic
 p_target = p_pob - 100
 d_dpoi = depth_total - ((p_wf - p_target) / gs)
 
-# --- DIAGNOSTIC LOGIC (The "Engineer's Assistant") ---
+# --- SMART ASSISTANT INTERPRETATIONS ---
 diagnostics = []
 
-# 1. Injection Depth Analysis
+# 1. Lift Potential
 if d_dpoi > depth_total:
-    diagnostics.append("❌ ERROR: Calculated DPOI exceeds total depth. Check your casing pressure.")
-elif d_dpoi < 2000:
-    diagnostics.append("⚠️ WARNING: Injection point is too shallow. You may need higher injection pressure.")
+    diagnostics.append("❌ ERROR: Required injection depth exceeds well depth. Increase casing pressure.")
+elif d_dpoi < (depth_total * 0.3):
+    diagnostics.append("⚠️ WARNING: Injection is very shallow. Artificial lift efficiency will be low.")
 else:
-    diagnostics.append("✅ OPTIMAL: Injection point is deep enough to provide effective drawdown.")
+    diagnostics.append("✅ SUCCESS: Deep injection point achieved for maximum drawdown.")
 
 # 2. Backpressure Analysis
-if p_wh > 250:
-    diagnostics.append("⚠️ ALERT: High wellhead pressure detected. This restricts production. Consider lowering separator pressure.")
+if p_wh > 200:
+    diagnostics.append("⚠️ RESTRICTION: Operating point indicates high wellhead pressure/tubing restriction.")
+else:
+    diagnostics.append("✅ OPTIMAL: Low wellhead backpressure detected.")
 
-# 3. Pressure Differential
-p_diff = p_pob - p_target
-if p_diff < 100:
-    diagnostics.append("⚠️ STABILITY: Valve differential pressure is low. Risk of gas lift instability.")
-
-# 4. Reservoir Health
-drawdown = p_s - p_wf
-if drawdown < 100:
-    diagnostics.append("📉 DIAGNOSIS: Potential formation damage or low Productivity Index (PI) detected.")
+# 3. Reservoir Analysis
+if (p_s - p_wf) < 150:
+    diagnostics.append("📉 DIAGNOSIS: Potential formation damage detected (Low Drawdown).")
+else:
+    diagnostics.append("📈 STATUS: Productivity index appears healthy.")
 
 # --- VISUALIZATION ---
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=[0, p_wf], y=[wfl_depth, depth_total], name="WFL-Pwf Line", line=dict(color='blue', width=3)))
-fig.add_trace(go.Scatter(x=[0, p_s], y=[sfl_depth, depth_total], name="SFL-Ps Line", line=dict(color='orange', dash='dash')))
-fig.add_trace(go.Scatter(x=[p_so_surf, p_so_td], y=[0, depth_total], name="Pso Casing Line", line=dict(color='green', width=3)))
-fig.add_trace(go.Scatter(x=[p_wh, p_target], y=[0, d_dpoi], name="Gradient Above Injection", line=dict(color='red', width=2)))
-fig.add_trace(go.Scatter(x=[p_pob], y=[d_pob], name="POB (Balance)", mode="markers", marker=dict(size=12, color='black')))
-fig.add_trace(go.Scatter(x=[p_target], y=[d_dpoi], name="DPOI (Injection)", mode="markers", marker=dict(size=15, color='red', symbol='star')))
 
-fig.update_layout(yaxis=dict(autorange="reversed"), template="plotly_white", height=700, 
-                  xaxis_title="Pressure (psig)", yaxis_title="Depth (ft)")
+# Tubing Lines
+fig.add_trace(go.Scatter(x=[0, p_wf], y=[wfl_depth, depth_total], name="Working Fluid Gradient", line=dict(color='#1f77b4', width=3)))
+fig.add_trace(go.Scatter(x=[0, p_s], y=[sfl_depth, depth_total], name="Static Fluid Gradient", line=dict(color='#ff7f0e', dash='dash')))
+
+# Casing Lines
+fig.add_trace(go.Scatter(x=[p_ko_surf, p_ko_td], y=[0, depth_total], name="Kick-off Pressure (Casing)", line=dict(color='#2ca02c', dash='dot', width=1.5)))
+fig.add_trace(go.Scatter(x=[p_so_surf, p_so_td], y=[0, depth_total], name="Operating Pressure (Casing)", line=dict(color='#2ca02c', width=3)))
+
+# Lifted Gradient Line
+fig.add_trace(go.Scatter(x=[p_wh, p_target], y=[0, d_dpoi], name="Lifted Gradient (Flowing)", line=dict(color='#d62728', width=2)))
+
+# Intercept Points
+fig.add_trace(go.Scatter(x=[p_pob], y=[d_pob], name="POB (Balance Point)", mode="markers", 
+                         marker=dict(size=14, color='cyan', symbol='circle', line=dict(width=2, color='black'))))
+
+fig.add_trace(go.Scatter(x=[p_target], y=[d_dpoi], name="Injection Valve (DPOI)", mode="markers", 
+                         marker=dict(size=18, color='yellow', symbol='star', line=dict(width=1, color='red'))))
+
+fig.update_layout(
+    title="Gas Lift Pressure-Depth Construction",
+    xaxis_title="Pressure (psig)",
+    yaxis_title="Depth (ft)",
+    yaxis=dict(autorange="reversed", gridcolor='LightGray'),
+    xaxis=dict(gridcolor='LightGray'),
+    template="plotly_white",
+    height=800,
+    legend=dict(yanchor="bottom", y=0.01, xanchor="right", x=0.99)
+)
 
 # --- DISPLAY ---
-col1, col2 = st.columns([2, 1])
+col_graph, col_assist = st.columns([2.5, 1])
 
-with col1:
+with col_graph:
     st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    st.subheader("📋 Assistant's Interpretation")
+with col_assist:
+    st.subheader("🤖 Engineer's Assistant")
     for msg in diagnostics:
         if "❌" in msg: st.error(msg)
         elif "⚠️" in msg: st.warning(msg)
@@ -91,6 +113,9 @@ with col2:
         else: st.info(msg)
     
     st.divider()
+    st.write("#### Design Summary")
     st.metric("Injection Depth", f"{d_dpoi:.0f} ft")
-    st.metric("Valve Pressure (Pvd)", f"{p_target:.1f} psi")
-    st.info(f"The assistant analyzed your data based on Slide 18 graphical construction rules.")
+    st.metric("Balance Depth", f"{d_pob:.0f} ft")
+    st.metric("Drawdown", f"{p_s - p_wf:.0f} psi")
+    
+    st.info("💡 Adjust values in the sidebar to see real-time graphical updates and diagnostic warnings.")
