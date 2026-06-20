@@ -4,81 +4,112 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="UTM Gas Lift Designer", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="UTM Graphical Gas Lift Tool", layout="wide", page_icon="📈")
 
-st.title("🚀 Option B: Gas Lift Valve Spacing App")
-st.markdown("### Based on Chapter 3: Analytical Method (Dr. Abdul Rahim Risal)")
+st.title("📈 Gas Lift Design: Graphical Method")
+st.markdown("### Determination of Injection Point (DPOI) - Slide 10/18 Logic")
 
-# --- SIDEBAR: INPUT DATA (Default values from Example 4, Slide 29) ---
-st.sidebar.header("📂 Well Data")
-well_depth = st.sidebar.number_input("Well Depth (ft)", value=5000)
-p_wh = st.sidebar.number_input("Wellhead Pressure (Pwh), psi", value=200)
-p_ko = st.sidebar.number_input("Kick-off Pressure (Pko), psi", value=900)
-p_so = st.sidebar.number_input("Surface Operating Pressure (Pso), psi", value=850)
+# --- SIDEBAR INPUTS (Default values from Example 3, Slide 17-18) ---
+st.sidebar.header("📂 1. Reservoir & Well Data")
+depth_total = st.sidebar.number_input("Total well depth (ft)", value=10000)
+p_s = st.sidebar.number_input("Static Reservoir Pressure (Ps), psig", value=3000)
+p_wf = st.sidebar.number_input("Flowing Bottomhole Pressure (Pwf), psig", value=2867)
+p_wh = st.sidebar.number_input("Wellhead Pressure (Pwh), psig", value=100)
 
-st.sidebar.header("📂 Gradients")
-gs = st.sidebar.number_input("Kill Fluid Gradient (Gs), psi/ft", value=0.50)
-gu = st.sidebar.number_input("Design Unloading Gradient (Gu), psi/ft", value=0.125)
+st.sidebar.header("📂 2. Casing Pressures")
+p_ko = st.sidebar.number_input("Kick-off Pressure (Pko), psig", value=1000)
+p_so = st.sidebar.number_input("Surface Operating Pressure (Pso), psig", value=950)
 
-st.sidebar.header("📂 Constraints")
-d_inj = st.sidebar.number_input("Injection Depth (ft)", value=3921)
-min_space = st.sidebar.number_input("Min. Spacing (ft)", value=250)
-delta_p = st.sidebar.number_input("Drop per Valve (psi)", value=25)
+st.sidebar.header("📂 3. Gradients (psi/ft)")
+gs = st.sidebar.number_input("Fluid Gradient (Gs/Gfb), psi/ft", value=0.455, format="%.3f")
+gpko = st.sidebar.number_input("Gas Kick-off Gradient (Gpko), psi/ft", value=0.025, format="%.3f")
+gpso = st.sidebar.number_input("Gas Operating Gradient (Gpso), psi/ft", value=0.022, format="%.3f")
 
 # --- CALCULATIONS ---
-valves = []
-# 1. Top Valve (Slide 26)
-# Unloaded to pit means Psurface = 0
-dv1 = (p_ko - 50 - 0) / gs
-valves.append({"Valve": 1, "Depth (ft)": round(dv1, 0)})
 
-# 2. Subsequent Valves (Slide 27)
-current_depth = dv1
-p_so_val = p_so
-v_count = 2
+# 1. Calculate Fluid Levels (Slide 2 & 10)
+# SFL = Depth - (Ps / Gs)
+sfl_depth = depth_total - (p_s / gs)
+# WFL = Depth - (Pwf / Gs)
+wfl_depth = depth_total - (p_wf / gs)
 
-while current_depth < d_inj and v_count < 15:
-    p_so_val -= delta_p # Pressure drop for balanced valve
-    increment = (p_so_val - (gu * current_depth)) / gs
-    
-    if increment < min_space: increment = min_space
-    
-    new_depth = current_depth + increment
-    if new_depth > d_inj: break
-    
-    valves.append({"Valve": v_count, "Depth (ft)": round(new_depth, 0)})
-    current_depth = new_depth
-    v_count += 1
+# 2. Points for lines
+z = np.linspace(0, depth_total, 100)
 
-df_valves = pd.DataFrame(valves)
+# Casing Lines
+line_pko = p_ko + (gpko * z)
+line_pso = p_so + (gpso * z)
 
-# --- PLOTTING ---
-depth_plot = np.linspace(0, well_depth, 100)
-p_casing = p_so + (0.02 * depth_plot) # Casing pressure line
-p_tubing = p_wh + (gu * depth_plot)   # Tubing gradient line
+# Tubing Flowing Gradient (Below Injection - Gfb)
+# Starts at Pwf at total depth and goes UP with slope Gs
+line_gfb = p_wf - (gs * (depth_total - z))
 
+# 3. Intersection Points (Slide 10/18)
+# Point of Balance (POB): Where line_gfb == line_pso
+# Pso + Gpso*D = Pwf - Gs*(Depth - D) -> Solve for D
+d_pob = (p_wf - p_so - gs * depth_total) / (gpso - gs)
+p_pob = p_so + (gpso * d_pob)
+
+# Deepest Point of Injection (DPOI)
+# DPOI is where Tubing Gradient = Casing Pressure - 100 psi (Slide 18 Step 12)
+d_dpoi = (p_wf - (p_so - 100) - gs * depth_total) / (gpso - gs)
+p_dpoi_casing = p_so + (gpso * d_dpoi)
+p_dpoi_tubing = p_dpoi_casing - 100
+
+# --- VISUALIZATION ---
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=p_casing, y=depth_plot, name="Casing Pressure", line=dict(color='green')))
-fig.add_trace(go.Scatter(x=p_tubing, y=depth_plot, name="Tubing Pressure", line=dict(color='blue')))
-fig.add_trace(go.Scatter(x=[p_wh + (gu*d) for d in df_valves['Depth (ft)']], 
-                         y=df_valves['Depth (ft)'], mode='markers+text', 
-                         name="Valves", text=[f"V{int(n)}" for n in df_valves['Valve']],
-                         marker=dict(size=12, color='red', symbol='triangle-left')))
 
-fig.update_layout(yaxis=dict(autorange="reversed"), template="plotly_white", 
-                  title="Gas Lift Pressure-Depth Diagram", xaxis_title="Pressure (psi)", yaxis_title="Depth (ft)")
+# Casing Pressure Lines
+fig.add_trace(go.Scatter(x=line_pko, y=z, name="Pko (Kick-off)", line=dict(color='green', dash='dot')))
+fig.add_trace(go.Scatter(x=line_pso, y=z, name="Pso (Operating)", line=dict(color='green', width=3)))
 
-# --- DISPLAY ---
-t1, t2 = st.tabs(["📈 Design Plot", "🧮 Workings"])
-with t1:
-    col1, col2 = st.columns([3, 1])
-    col1.plotly_chart(fig, use_container_width=True)
-    col2.success(f"**Total Valves:** {len(df_valves)}")
-    col2.dataframe(df_valves, hide_index=True)
+# Tubing Pressure Line (Gfb)
+fig.add_trace(go.Scatter(x=line_gfb, y=z, name="Gfb (Tubing Gradient)", line=dict(color='blue', width=3)))
 
-with t2:
-    st.subheader("Analytical Formulas Used")
-    st.write("Calculations follow **Slide 26 & 27** equations:")
-    st.latex(r"DV_1 = \frac{P_{ko}-50}{G_s}")
-    st.latex(r"DV_{n+1} = DV_n + \frac{P_{so} - G_u(DV_n)}{G_s}")
-    st.info("Note: Calculation assumes unloading to pit (P_surface = 0) as per Example 4.")
+# SFL and WFL lines (Horizontal markers)
+fig.add_hline(y=sfl_depth, line_dash="dash", line_color="orange", annotation_text=f"SFL: {sfl_depth:.0f} ft")
+fig.add_hline(y=wfl_depth, line_dash="dash", line_color="red", annotation_text=f"WFL: {wfl_depth:.0f} ft")
+
+# POB and DPOI Markers
+fig.add_trace(go.Scatter(x=[p_pob], y=[d_pob], name="POB (Balance)", mode="markers", marker=dict(size=12, color='black', symbol='circle')))
+fig.add_trace(go.Scatter(x=[p_dpoi_tubing], y=[d_dpoi], name="DPOI (Injection)", mode="markers", marker=dict(size=15, color='red', symbol='star')))
+
+fig.update_layout(
+    title="Graphical Gas Lift Design (Pressure-Depth)",
+    xaxis_title="Pressure (psig)",
+    yaxis_title="Depth (ft)",
+    yaxis=dict(autorange="reversed", range=[depth_total + 500, 0]),
+    xaxis=dict(range=[0, p_s + 500]),
+    template="plotly_white",
+    height=800,
+    legend=dict(yanchor="bottom", y=0.01, xanchor="right", x=0.99)
+)
+
+# --- UI LAYOUT ---
+col_plot, col_res = st.columns([2, 1])
+
+with col_plot:
+    st.plotly_chart(fig, use_container_width=True)
+
+with col_res:
+    st.success("### Design Results")
+    st.metric("SFL (Static Fluid Level)", f"{sfl_depth:.1f} ft")
+    st.metric("WFL (Working Fluid Level)", f"{wfl_depth:.1f} ft")
+    st.metric("POB (Balance Depth)", f"{d_pob:.1f} ft")
+    st.metric("DPOI (Injection Depth)", f"{d_dpoi:.1f} ft", delta="Target Valve")
+    
+    st.divider()
+    st.info("""
+    **How to read the graph:**
+    - **POB (Black Circle):** Where casing and tubing pressures are exactly equal.
+    - **DPOI (Red Star):** The actual valve depth, allowing for a **100 psi** differential (Step 12, Slide 18).
+    """)
+
+# Data Table
+with st.expander("📊 View Data Points"):
+    st.write("Calculated based on your input gradients:")
+    st.dataframe(pd.DataFrame({
+        "Depth (ft)": [0, sfl_depth, wfl_depth, d_dpoi, d_pob, depth_total],
+        "Casing P (psi)": [p_so, p_so + gpso*sfl_depth, p_so + gpso*wfl_depth, p_dpoi_casing, p_pob, p_so + gpso*depth_total],
+        "Tubing P (psi)": [p_wh, 0, 0, p_dpoi_tubing, p_pob, p_wf]
+    }).round(1))
