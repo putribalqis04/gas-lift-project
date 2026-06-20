@@ -13,7 +13,7 @@ st.divider()
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("📁 Field Data Input")
-depth_total = st.sidebar.number_input("Total well depth (ft)", value=10000)
+depth_total = st.sidebar.number_input("Total Well Depth (ft)", value=10000)
 p_s = st.sidebar.number_input("Static Reservoir Pressure (Ps), psi", value=3000)
 p_wf = st.sidebar.number_input("Flowing BHP (Pwf), psi", value=2867)
 p_wh = st.sidebar.number_input("Wellhead Pressure (Pwh), psi", value=100)
@@ -24,27 +24,32 @@ p_so_surf = st.sidebar.number_input("Surface Operating Pressure (Pso), psi", val
 
 st.sidebar.header("📁 Design Constraints")
 gs = st.sidebar.number_input("Kill Fluid Gradient (Gs), psi/ft", value=0.455, format="%.3f")
-gpso = st.sidebar.number_input("Gas Operating Gradient, psi/ft", value=0.022, format="%.3f")
+gpko = st.sidebar.number_input("Gas Kick-off Gradient (Gpko), psi/ft", value=0.025, format="%.3f")
+gpso = st.sidebar.number_input("Gas Operating Gradient (Gpso), psi/ft", value=0.022, format="%.3f")
 min_space = st.sidebar.number_input("Min. Spacing Constraint (ft)", value=300)
 min_spread = st.sidebar.number_input("Min. Valve Spread (psi)", value=100)
 
 # --- CALCULATIONS ---
 
-# 1. Graphical Construction Points
-wfl_depth = depth_total - (p_wf / gs)
-sfl_depth = depth_total - (p_s / gs)
-p_so_td = p_so_surf + (gpso * depth_total)
+# 1. Graphical Construction Points (Using requested formulas)
+sfl_depth = depth_total - (p_s / gs)    # SFL Line Calculation
+wfl_depth = depth_total - (p_wf / gs)   # WFL Line Calculation
+p_ko_td = p_ko_surf + (gpko * depth_total) # Pko @ Depth
+p_so_td = p_so_surf + (gpso * depth_total) # Pso @ Depth
 
 # 2. Key Intersections
+# Point of Balance (POB)
 d_pob = (p_so_surf - p_wf + gs * depth_total) / (gs - gpso)
 p_pob = p_so_surf + (gpso * d_pob)
-p_target = p_pob - 100 # Differential logic at DPOI
+
+# DPOI Logic (100psi offset from POB)
+p_target = p_pob - 100 
 d_dpoi = depth_total - ((p_wf - p_target) / gs)
 g_fa = (p_target - p_wh) / d_dpoi # Lifted gradient slope
 
-# 3. Smart Valve Selection Logic (Iterative with Validation)
+# 3. Iterative Valve Selection with Rejection Logging
 final_valves = []
-skipped_valves = []
+rejections = []
 last_valid_d = 0
 v_idx = 1
 curr_candidate_d = 0
@@ -68,24 +73,23 @@ while curr_candidate_d < d_dpoi and v_idx < 15:
 
     fail_reason = ""
     if v_idx > 1 and spacing < min_space:
-        fail_reason = f"Spacing {spacing:.0f}ft < {min_space}ft"
+        fail_reason = f"Insufficient Spacing ({spacing:.0f} ft)"
     elif spread < min_spread:
-        fail_reason = f"Spread {spread:.0f}psi < {min_spread}psi"
+        fail_reason = f"Insufficient Spread ({spread:.0f} psi)"
 
     if fail_reason == "":
-        final_valves.append({"Valve": f"Valve {v_idx}", "Depth": round(candidate_d, 0), "Pressure": round(p_tubing_cand, 1), "Status": "✅ Accepted"})
+        final_valves.append({"ID": f"Valve {v_idx}", "Depth": round(candidate_d, 0), "Pressure": round(p_tubing_cand, 1)})
         last_valid_d = candidate_d
     else:
-        skipped_valves.append({"Valve": f"Valve {v_idx}", "Reason": fail_reason})
+        rejections.append({"ID": f"Candidate {v_idx}", "Attempted Depth": round(candidate_d, 0), "Reason": fail_reason})
     
     curr_candidate_d = candidate_d
     v_idx += 1
 
-# Add Operating Valve
-final_valves.append({"Valve": "Operating Valve", "Depth": round(d_dpoi, 0), "Pressure": round(p_target, 1), "Status": "🎯 Target"})
+final_valves.append({"ID": "Operating Valve", "Depth": round(d_dpoi, 0), "Pressure": round(p_target, 1)})
 v_df = pd.DataFrame(final_valves)
 
-# --- UI LAYOUT WITH TABS ---
+# --- UI LAYOUT ---
 tab1, tab2, tab3 = st.tabs(["📈 Design Construction", "🤖 Engineer's Assistant", "📚 Gas Lift Academy"])
 
 with tab1:
@@ -93,50 +97,47 @@ with tab1:
     # Gradient Lines
     fig.add_trace(go.Scatter(x=[0, p_wf], y=[wfl_depth, depth_total], name="Working Fluid Gradient", line=dict(color='#1f77b4', width=3)))
     fig.add_trace(go.Scatter(x=[0, p_s], y=[sfl_depth, depth_total], name="Static Fluid Gradient", line=dict(color='#ff7f0e', dash='dash')))
-    fig.add_trace(go.Scatter(x=[p_so_surf, p_so_td], y=[0, depth_total], name="Casing Pressure (Pso)", line=dict(color='#2ca02c', width=3)))
+    fig.add_trace(go.Scatter(x=[p_ko_surf, p_ko_td], y=[0, depth_total], name="Kick-off Casing (Pko)", line=dict(color='#2ca02c', dash='dot', width=1.5)))
+    fig.add_trace(go.Scatter(x=[p_so_surf, p_so_td], y=[0, depth_total], name="Operating Casing (Pso)", line=dict(color='#2ca02c', width=3)))
     fig.add_trace(go.Scatter(x=[p_wh, p_target], y=[0, d_dpoi], name="Lifted Flowing Gradient", line=dict(color='#d62728', width=3)))
     
     # Construction Points
     fig.add_trace(go.Scatter(x=[p_pob], y=[d_pob], name="POB (Balance Point)", mode="markers", marker=dict(size=14, color='cyan', line=dict(width=2, color='black'))))
     fig.add_trace(go.Scatter(x=[p_target], y=[d_dpoi], name="DPOI (Injection Point)", mode="markers", marker=dict(size=18, color='yellow', symbol='star', line=dict(width=1, color='red'))))
     
-    # Selected Valves (on the red line)
-    fig.add_trace(go.Scatter(x=v_df['Pressure'], y=v_df['Depth'], mode='markers+text', name="Selected Valves", text=v_df['Valve'], textposition="middle right", marker=dict(size=10, color='red', symbol='triangle-left')))
+    # Selected Valves
+    fig.add_trace(go.Scatter(x=v_df['Pressure'], y=v_df['Depth'], mode='markers+text', name="Final Valves", text=v_df['ID'], textposition="middle right", marker=dict(size=10, color='red', symbol='triangle-left')))
 
     fig.update_layout(yaxis=dict(autorange="reversed"), template="plotly_white", height=700, xaxis_title="Pressure (psig)", yaxis_title="Depth (ft)", legend=dict(yanchor="top", y=0.99, xanchor="left", x=1.02))
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
     st.subheader("📋 Final Valve Schedule")
-    st.dataframe(v_df[['Valve', 'Depth', 'Status']], hide_index=True, use_container_width=True)
+    st.dataframe(v_df, hide_index=True, use_container_width=True)
     
-    if skipped_valves:
-        st.warning("⚠️ Validation Exceptions (Skips)")
-        for sv in skipped_valves:
-            st.write(f"**{sv['Valve']}** was excluded: *{sv['Reason']}*")
-    
+    if rejections:
+        st.warning("⚠️ Rejected Valve Candidates")
+        st.dataframe(pd.DataFrame(rejections), hide_index=True, use_container_width=True)
+
     st.divider()
-    st.subheader("🤖 Smart Interpretations")
-    if d_dpoi > depth_total: st.error("❌ Invalid Design: Injection depth exceeds well depth.")
-    elif d_dpoi < 3000: st.warning("⚠️ Warning: Shallow injection point. Efficiency may be low.")
-    else: st.success("✅ Success: Deep injection achieved for maximum drawdown.")
-    
-    st.info(f"**Selection Logic:** Validated using minimum {min_space}ft spacing and {min_spread}psi casing-to-tubing spread.")
+    st.subheader("🧮 Technical Calculation Summary")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        st.write("**Fluid Level Construction:**")
+        st.latex(rf"SFL = {depth_total} - \frac{{{p_s}}}{{{gs}}} = {sfl_depth:.0f} \text{{ ft}}")
+        st.latex(rf"WFL = {depth_total} - \frac{{{p_wf}}}{{{gs}}} = {wfl_depth:.0f} \text{{ ft}}")
+    with col_f2:
+        st.write("**Casing Pressure at TD:**")
+        st.latex(rf"P_{{ko\_depth}} = {p_ko_surf} + ({gpko} \times {depth_total}) = {p_ko_td:.1f} \text{{ psi}}")
+        st.latex(rf"P_{{so\_depth}} = {p_so_surf} + ({gpso} \times {depth_total}) = {p_so_td:.1f} \text{{ psi}}")
 
 with tab3:
-    st.header("📖 Gas Lift Academy: Tailored Theory")
-    with st.expander("1. Graphical Construction Key"):
-        st.write("""
-        - **POB (Point of Balance):** The depth where casing and tubing pressures are equal. 
-        - **DPOI (Deepest Point of Injection):** The location of the operating valve, set 100 psi (differential) left of the POB.
-        """)
-
-    with st.expander("2. Automated Selection Logic"):
-        st.write("""
-        To ensure mechanical integrity, **GLIS** validates each valve depth candidate:
-        - **Valve Spacing:** If valves are closer than 300ft, the system skips the candidate to prevent pressure interference.
-        - **Valve Spread:** A minimum differential (100 psi) is required to ensure the valve can actually open/close reliably.
-        """)
-
-    with st.expander("3. Analytical Derivations"):
-        st.latex(r"DV_{n+1} = DV_n + \frac{P_{so} - G_u(DV_n) - P_{surface}}{G_{kill}}")
+    st.header("📖 Gas Lift Academy")
+    with st.expander("1. Construction Formulas Used"):
+        st.write("The app uses the following formulas as per industry standards:")
+        st.markdown("- **Static Fluid Level (SFL):** Depth where reservoir pressure is balanced by the static fluid column.")
+        st.latex(r"SFL = Depth_{Total} - \frac{P_s}{G_s}")
+        st.markdown("- **Working Fluid Level (WFL):** Depth representing the fluid column height under flowing conditions.")
+        st.latex(r"WFL = Depth_{Total} - \frac{P_{wf}}{G_s}")
+        st.markdown("- **Casing Pressure Profile:** Calculated by accounting for the gas column weight.")
+        st.latex(r"P_{casing\_at\_depth} = P_{surface} + (G_{gas} \times Depth)")
