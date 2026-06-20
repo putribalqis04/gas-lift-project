@@ -4,121 +4,81 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="UTM Gas Lift Design", layout="wide")
+st.set_page_config(page_title="UTM Gas Lift Designer", layout="wide", page_icon="🚀")
 
-st.title("🚀 Gas Lift Design: Valve Spacing Application")
-st.markdown("Developed based on **Chapter 3: Artificial Lift** by Dr. Abdul Rahim Risal")
+st.title("🚀 Option B: Gas Lift Valve Spacing App")
+st.markdown("### Based on Chapter 3: Analytical Method (Dr. Abdul Rahim Risal)")
 
-# --- SIDEBAR INPUTS (Based on Example 4, Slide 29) ---
-st.sidebar.header("📁 1. Design Parameters")
-well_depth = st.sidebar.number_input("Total Well Depth (ft)", value=5000)
+# --- SIDEBAR: INPUT DATA (Default values from Example 4, Slide 29) ---
+st.sidebar.header("📂 Well Data")
+well_depth = st.sidebar.number_input("Well Depth (ft)", value=5000)
 p_wh = st.sidebar.number_input("Wellhead Pressure (Pwh), psi", value=200)
 p_ko = st.sidebar.number_input("Kick-off Pressure (Pko), psi", value=900)
 p_so = st.sidebar.number_input("Surface Operating Pressure (Pso), psi", value=850)
 
-st.sidebar.header("📁 2. Gradients")
-gs = st.sidebar.number_input("Kill Fluid Gradient (Gs), psi/ft", value=0.500)
+st.sidebar.header("📂 Gradients")
+gs = st.sidebar.number_input("Kill Fluid Gradient (Gs), psi/ft", value=0.50)
 gu = st.sidebar.number_input("Design Unloading Gradient (Gu), psi/ft", value=0.125)
 
-st.sidebar.header("📁 3. Constraints")
-d_inj = st.sidebar.number_input("Target Injection Depth (ft)", value=3921)
-min_spacing = st.sidebar.number_input("Min. Valve Spacing (ft)", value=250)
-delta_p = st.sidebar.number_input("Valve Pressure Drop (psig/valve)", value=25)
+st.sidebar.header("📂 Constraints")
+d_inj = st.sidebar.number_input("Injection Depth (ft)", value=3921)
+min_space = st.sidebar.number_input("Min. Spacing (ft)", value=250)
+delta_p = st.sidebar.number_input("Drop per Valve (psi)", value=25)
 
-# --- CALCULATION LOGIC (Analytical Method Slide 26-27) ---
+# --- CALCULATIONS ---
 valves = []
+# 1. Top Valve (Slide 26)
+# Unloaded to pit means Psurface = 0
+dv1 = (p_ko - 50 - 0) / gs
+valves.append({"Valve": 1, "Depth (ft)": round(dv1, 0)})
 
-# Valve 1 Depth (Slide 26)
-# DV1 = (Pko - 50 - Psurface) / Gs
-# Note: Dr. uses Psurface = 0 if unloaded to pit (Example 4)
-p_surface_unloading = 0 
-dv1 = (p_ko - 50 - p_surface_unloading) / gs
-valves.append({"Valve": 1, "Depth": round(dv1, 0)})
-
-# Subsequent Valves (Slide 27)
-# DV_next = DV_prev + (Pso_prev - Gu(DV_prev) - Psurface) / Gs
+# 2. Subsequent Valves (Slide 27)
 current_depth = dv1
-valve_num = 2
-p_so_current = p_so
+p_so_val = p_so
+v_count = 2
 
-while current_depth < d_inj:
-    p_so_current = p_so_current - delta_p # Balanced valve drop
+while current_depth < d_inj and v_count < 15:
+    p_so_val -= delta_p # Pressure drop for balanced valve
+    increment = (p_so_val - (gu * current_depth)) / gs
     
-    # Formula from Slide 27
-    num = p_so_current - (gu * current_depth) - p_surface_unloading
-    increment = num / gs
+    if increment < min_space: increment = min_space
     
-    # Check if spacing is too small
-    if increment < min_spacing:
-        increment = min_spacing
-        
     new_depth = current_depth + increment
+    if new_depth > d_inj: break
     
-    if new_depth > d_inj:
-        break
-        
-    valves.append({"Valve": valve_num, "Depth": round(new_depth, 0)})
+    valves.append({"Valve": v_count, "Depth (ft)": round(new_depth, 0)})
     current_depth = new_depth
-    valve_num += 1
+    v_count += 1
 
 df_valves = pd.DataFrame(valves)
 
-# --- VISUALIZATION ---
-# Create Pressure lines for the chart
-depth_axis = np.linspace(0, well_depth, 100)
-casing_p = p_so + (0.02 * depth_axis) # Gas column weight (approx 0.02 psi/ft)
-tubing_p = p_wh + (gu * depth_axis)  # Unloading gradient
+# --- PLOTTING ---
+depth_plot = np.linspace(0, well_depth, 100)
+p_casing = p_so + (0.02 * depth_plot) # Casing pressure line
+p_tubing = p_wh + (gu * depth_plot)   # Tubing gradient line
 
 fig = go.Figure()
+fig.add_trace(go.Scatter(x=p_casing, y=depth_plot, name="Casing Pressure", line=dict(color='green')))
+fig.add_trace(go.Scatter(x=p_tubing, y=depth_plot, name="Tubing Pressure", line=dict(color='blue')))
+fig.add_trace(go.Scatter(x=[p_wh + (gu*d) for d in df_valves['Depth (ft)']], 
+                         y=df_valves['Depth (ft)'], mode='markers+text', 
+                         name="Valves", text=[f"V{int(n)}" for n in df_valves['Valve']],
+                         marker=dict(size=12, color='red', symbol='triangle-left')))
 
-# Casing Pressure Line
-fig.add_trace(go.Scatter(x=casing_p, y=depth_axis, name="Casing Pressure (Pso)", line=dict(color='green')))
-# Tubing Pressure Line
-fig.add_trace(go.Scatter(x=tubing_p, y=depth_axis, name="Tubing Pressure (Gu)", line=dict(color='blue')))
+fig.update_layout(yaxis=dict(autorange="reversed"), template="plotly_white", 
+                  title="Gas Lift Pressure-Depth Diagram", xaxis_title="Pressure (psi)", yaxis_title="Depth (ft)")
 
-# Valve Points
-fig.add_trace(go.Scatter(
-    x=[p_wh + (gu * d) for d in df_valves['Depth']],
-    y=df_valves['Depth'],
-    mode="markers+text",
-    name="Gas Lift Valves",
-    text=[f"V{int(n)}" for n in df_valves['Valve']],
-    textposition="top right",
-    marker=dict(size=12, color='red', symbol='triangle-left')
-))
+# --- DISPLAY ---
+t1, t2 = st.tabs(["📈 Design Plot", "🧮 Workings"])
+with t1:
+    col1, col2 = st.columns([3, 1])
+    col1.plotly_chart(fig, use_container_width=True)
+    col2.success(f"**Total Valves:** {len(df_valves)}")
+    col2.dataframe(df_valves, hide_index=True)
 
-fig.update_layout(
-    title="Gas Lift Pressure-Depth Diagram (Analytical Spacing)",
-    xaxis_title="Pressure (psi)",
-    yaxis_title="Depth (ft)",
-    yaxis=dict(autorange="reversed"), # Depth 0 at top
-    template="plotly_white",
-    height=700
-)
-
-# --- UI LAYOUT ---
-tab1, tab2 = st.tabs(["📊 Valve Spacing Plot", "🧮 Spacing Workings"])
-
-with tab1:
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        st.success("### Results")
-        st.write(f"Total Valves: **{len(df_valves)}**")
-        st.dataframe(df_valves, hide_index=True)
-        st.info("The diagram shows the casing and tubing gradients crossing at the valve locations.")
-
-with tab2:
-    st.subheader("Step-by-Step Analytical Method")
-    
-    st.markdown("#### 1. Top Valve (DV1)")
-    st.latex(r"DV_1 = \frac{(P_{ko} - 50) - P_{surface}}{G_s}")
-    st.write(f"Result: **{dv1:.1f} ft**")
-
-    st.markdown("#### 2. Consequent Valves (DVn)")
-    st.latex(r"DV_{n+1} = DV_n + \frac{P_{so} - G_u(DV_n) - P_{surface}}{G_s}")
-    
-    st.divider()
-    st.write("#### 📝 Assignment Reference")
-    st.write("This app logic follows **Slide 29 (Example 4)** exactly. If you use those inputs, your valve depths will match the manual calculation.")
+with t2:
+    st.subheader("Analytical Formulas Used")
+    st.write("Calculations follow **Slide 26 & 27** equations:")
+    st.latex(r"DV_1 = \frac{P_{ko}-50}{G_s}")
+    st.latex(r"DV_{n+1} = DV_n + \frac{P_{so} - G_u(DV_n)}{G_s}")
+    st.info("Note: Calculation assumes unloading to pit (P_surface = 0) as per Example 4.")
