@@ -29,10 +29,6 @@ except:
 
 st.divider()
 
-# ... [The rest of your calculation code] ...
-
-st.divider()
-
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("📂 Reservoir & Well Data")
 depth_total = st.sidebar.number_input("Total Well Depth (ft)", value=10000)
