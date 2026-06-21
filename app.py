@@ -2,26 +2,34 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from PIL import Image
+import os
 
 # --- PAGE CONFIG ---
 st.set_page_config(
     page_title="GLIS: Gas Lift Intelligent System", 
     layout="wide", 
-    page_icon="🛢️"
+    page_icon="🚀"
 )
 
-# --- HEADER WITH LOGO ---
+# --- NEW FAIL-SAFE LOGO SECTION ---
+# This checks if logo.png exists in the same folder as app.py
+logo_path = "Well_Performance_App/logo.png" if "Well_Performance_App" in os.listdir() else "logo.png"
+
 try:
     col_l, col_t = st.columns([1, 4])
     with col_l:
-        st.image("Well_Performance_App/logo.png", width=150)
+        st.image("logo.png", width=150) # This works if uploaded to the same folder
     with col_t:
         st.title("Gas Lift Intelligent System (GLIS)")
-        st.markdown("##### Smart Design • Optimized Performance | *Option B Specialist Tool*")
+        st.markdown("##### Smart Design • Optimized Performance")
 except:
-    st.title("Gas Lift Intelligent System (GLIS)")
+    # If the file is missing, it shows this nice header instead
+    st.title("🚀 Gas Lift Intelligent System (GLIS)")
     st.markdown("##### Smart Design • Optimized Performance")
+
+st.divider()
+
+# ... [The rest of your calculation code] ...
 
 st.divider()
 
